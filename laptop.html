@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AR Laptop Receiver</title>
+<style>
+html,body{margin:0;height:100%;background:#07070d;color:#eee;font-family:system-ui,-apple-system,sans-serif;overflow:hidden}
+#glow{position:fixed;inset:0;background:radial-gradient(circle at 50% 45%,rgba(255,200,90,.55),rgba(255,170,60,0) 60%);
+  opacity:0;transition:opacity .8s;pointer-events:none}
+body.on #glow{opacity:1}
+#flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none}
+#flash.go{animation:fl .6s}
+@keyframes fl{0%{opacity:.85}100%{opacity:0}}
+main{position:relative;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;box-sizing:border-box}
+#bulb{font-size:110px;transition:filter .6s,transform .6s;filter:grayscale(1) brightness(.4)}
+body.on #bulb{filter:none;transform:scale(1.06)}
+#card{display:none;background:linear-gradient(135deg,#1e1b3c,#0c1228);border:1px solid #fff4;border-radius:22px;
+  padding:26px 30px;max-width:460px;width:100%;box-sizing:border-box;box-shadow:0 20px 50px #000a;animation:pop .5s cubic-bezier(.2,1.4,.4,1)}
+@keyframes pop{from{transform:scale(.8);opacity:0}}
+#card h1{margin:0;font-size:30px}
+#card .t{color:#8fe3ff;margin-top:4px}
+#card .g{opacity:.8;margin-top:12px}
+#log{font-size:12px;opacity:.6;max-height:22vh;overflow:auto;width:min(90vw,460px)}
+#log div{padding:2px 0}
+#start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#07070d;z-index:5}
+#start input{font-size:16px;padding:12px;border-radius:12px;border:1px solid #fff4;background:#111;color:#fff;width:min(90vw,380px)}
+#start button{font-size:16px;padding:12px 26px;border:0;border-radius:24px;color:#fff;background:linear-gradient(135deg,#7c5cff,#00d4ff);cursor:pointer}
+#status{font-size:13px;opacity:.7}
+</style>
+</head>
+<body>
+<div id="glow"></div>
+<div id="flash"></div>
+
+<div id="start">
+  <input id="topic" placeholder="relay topic" autocomplete="off">
+  <button id="go">Connect to phone</button>
+  <div id="status">Use the same topic as RELAY.topic in index.html</div>
+</div>
+
+<main>
+  <div id="bulb">💡</div>
+  <div id="card"><h1 id="nm"></h1><div class="t" id="tt"></div><div class="g" id="tg"></div></div>
+  <div id="log"></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let es = null;
+
+function log(t){
+  const d=document.createElement('div');
+  d.textContent=new Date().toLocaleTimeString()+'  '+t;
+  $('log').prepend(d);
+}
+
+// Topic comes from the URL (laptop.html#topic) or the last one used.
+$('topic').value = decodeURIComponent(location.hash.slice(1)) || localStorage.getItem('ar_topic') || '';
+$('go').onclick = () => { const t=$('topic').value.trim(); if(t) connect(t); };
+
+function connect(t){
+  if(es) es.close();
+  localStorage.setItem('ar_topic', t);
+  // ntfy streams messages over Server-Sent Events; EventSource reconnects on its own.
+  es = new EventSource('https://ntfy.sh/' + encodeURIComponent(t) + '/sse');
+  es.onopen = () => { $('start').style.display='none'; log('listening on topic'); };
+  es.onerror = () => { $('status').textContent='Connection hiccup, retrying…'; };
+  es.onmessage = e => {
+    let m;
+    try{ const d=JSON.parse(e.data); if(d.event!=='message') return; m=JSON.parse(d.message); }
+    catch{ return; }
+    handle(m);
+  };
+}
+
+function handle(m){
+  if(m.t==='light'){
+    document.body.classList.toggle('on', !!m.on);
+    log('light ' + (m.on ? 'on' : 'off'));
+  }
+  else if(m.t==='flash'){
+    const f=$('flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
+    log('flash');
+  }
+  else if(m.t==='card'){
+    $('nm').textContent=String(m.name||'');
+    $('tt').textContent=String(m.title||'');
+    $('tg').textContent=String(m.tagline||'');
+    $('card').style.display='block';
+    log('card: '+(m.name||''));
+  }
+  else if(m.t==='open'){
+    const u=String(m.url||'');
+    // Only allow https links so a stray message can't open anything odd.
+    if(!/^https:\/\//.test(u)){ log('blocked non-https link'); return; }
+    // Works because the user clicked "Connect" on this page (popup permission).
+    const w=window.open(u,'_blank');
+    if(w) w.opener=null;
+    log((w ? 'opened ' : 'popup blocked, open manually: ') + u);
+  }
+}
+</script>
+</body>
+</html>

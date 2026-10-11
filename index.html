@@ -17,8 +17,10 @@ video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
 .row{display:flex;gap:12px;align-items:center}
 #face{width:70px;height:70px;border-radius:50%;object-fit:cover;border:3px solid transparent;
   background:linear-gradient(#111,#111) padding-box,linear-gradient(135deg,#7c5cff,#00d4ff) border-box;flex:none}
-#ico{width:70px;height:70px;border-radius:50%;display:none;align-items:center;justify-content:center;font-size:34px;flex:none;background:linear-gradient(135deg,#7c5cff55,#00d4ff55);border:3px solid #ffffff44}
-#glow{position:absolute;left:calc(var(--h)*-1.7);top:calc(var(--h)*-1.7);width:calc(var(--h)*3.4);height:calc(var(--h)*3.4);border-radius:50%;background:radial-gradient(circle,rgba(255,200,90,.6),rgba(255,170,60,0) 68%);mix-blend-mode:screen;opacity:0;transition:opacity .6s;pointer-events:none}
+#ico{width:70px;height:70px;border-radius:50%;display:none;align-items:center;justify-content:center;font-size:34px;flex:none;
+  background:linear-gradient(135deg,#7c5cff55,#00d4ff55);border:3px solid #ffffff44}
+#glow{position:absolute;left:calc(var(--h)*-1.7);top:calc(var(--h)*-1.7);width:calc(var(--h)*3.4);height:calc(var(--h)*3.4);border-radius:50%;
+  background:radial-gradient(circle,rgba(255,200,90,.6),rgba(255,170,60,0) 68%);mix-blend-mode:screen;opacity:0;transition:opacity .6s;pointer-events:none}
 #nm{font-size:18px;font-weight:700;line-height:1.15}
 #tt{font-size:12px;color:#8fe3ff;margin-top:3px}
 #og,#lc{font-size:11px;opacity:.75;margin-top:2px}
@@ -32,7 +34,7 @@ video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
 #cur{position:fixed;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;border:3px solid #00d4ff;
   background:rgba(0,212,255,.25);display:none;pointer-events:none;z-index:6}
 #cur.pin{background:#00d4ff}
-#hint{position:fixed;top:env(safe-area-inset-top,0);left:0;right:0;text-align:center;padding:14px;font-size:15px;
+#hint{position:fixed;top:env(safe-area-inset-top,0);left:0;right:0;text-align:center;padding:14px;font-size:15px;display:none;
   background:linear-gradient(#000a,#0000);pointer-events:none}
 #sheet{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0));transform:translateX(-50%);display:none;
   gap:10px;align-items:center;background:#111e;border:1px solid #fff5;border-radius:999px;padding:8px 10px 8px 18px;z-index:8}
@@ -57,7 +59,7 @@ video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
   </div>
 </div>
 <div id="cur"></div>
-<div id="hint">Point the camera at the QR code</div>
+<div id="hint"></div>
 <div id="sheet"><a id="sl" target="_blank" rel="noopener"></a><button id="sx">✕</button></div>
 <canvas id="c" style="display:none"></canvas>
 
@@ -71,12 +73,22 @@ const PROFILE = {
   phone:'0703382780', whatsapp:'254703382780', instagram:'lamecky2.0',
   email:'', github:'', linkedin:'', x:'', website:''
 };
+
+// ===== LAPTOP RELAY =====
+// Pick a long random string (anyone who knows it can trigger your laptop).
+// Use the SAME string in laptop.html.
+const RELAY = { topic: 'CHANGE-ME-to-a-long-random-string' };
+
 const DWELL = 900;   // ms to hold a finger over a button
 const $ = id => document.getElementById(id);
 const v=$('v'), c=$('c'), ctx=c.getContext('2d',{willReadFrequently:true}),
-      rig=$('rig'), grid=$('grid'), cur=$('cur'), hint=$('hint'), sheet=$('sheet'), sl=$('sl');
-const intl = n => { n=String(n).replace(/\D/g,''); return n.startsWith('0') ? '254'+n.slice(1) : n; };
+      rig=$('rig'), grid=$('grid'), cur=$('cur'), hint=$('hint'), sheet=$('sheet'), sl=$('sl'), glow=$('glow');
 
+// Native detector is much faster where it exists (Chrome/Edge on Android, desktop Chrome).
+// Falls back to jsQR everywhere else (iOS Safari).
+let BD=null; try{ if('BarcodeDetector' in window) BD=new BarcodeDetector({formats:['qr_code']}); }catch(e){}
+
+const intl = n => { n=String(n).replace(/\D/g,''); return n.startsWith('0') ? '254'+n.slice(1) : n; };
 const LINKS = {
   phone:     d => ['📞 Call',        'tel:+' + intl(d)],
   whatsapp:  d => ['💬 WhatsApp',    'https://wa.me/' + intl(d)],
@@ -88,12 +100,16 @@ const LINKS = {
   website:   d => ['🌐 Website',     d.startsWith('http') ? d : 'https://' + d],
 };
 
-// Paste real webhook URLs here later (e.g. Home Assistant). Empty = demo mode only.
-const HOOKS = { light_on:'', light_off:'', pc_wake:'', pc_sleep:'' };
-const hook = k => { if(HOOKS[k]) { try{ fetch(HOOKS[k],{method:'POST',mode:'no-cors'}); }catch(e){} } };
+// Send a message to the laptop receiver. Non-blocking.
+function send(msg){
+  if(!RELAY.topic || RELAY.topic.startsWith('CHANGE')){ flash('Set RELAY.topic in index.html first'); return; }
+  fetch('https://ntfy.sh/'+encodeURIComponent(RELAY.topic),{method:'POST',body:JSON.stringify(msg),keepalive:true})
+    .then(()=>flash('📡 Sent to laptop'))
+    .catch(()=>flash('Could not reach the relay'));
+}
+
 const load = (k,d) => { try{ return JSON.parse(localStorage.getItem('ar_'+k)) ?? d; }catch{ return d; } };
 const save = (k,v) => { try{ localStorage.setItem('ar_'+k, JSON.stringify(v)); }catch{} };
-const glow = $('glow');
 let btns = [], lastPayload = null;
 
 function setHead(h){
@@ -120,23 +136,26 @@ function buildCard(raw){
   const D={...PROFILE,...q};
   setHead({nm:D.name,tt:D.title,og:D.org,lc:D.loc?'📍 '+D.loc:'',tg:D.tagline});
   for(const k in LINKS) if(D[k]) addBtn(...LINKS[k](String(D[k])));
+  addBtn('🖥 Show on laptop', ()=>send({t:'card',name:D.name,title:D.title,tagline:D.tagline}));
+  if(D.website) addBtn('🚀 Open site on laptop', ()=>send({t:'open',url:D.website.startsWith('http')?D.website:'https://'+D.website}));
   const vcf=['BEGIN:VCARD','VERSION:3.0','FN:'+D.name,'ORG:'+(D.org||''),'TITLE:'+(D.title||''),
     D.phone?'TEL;TYPE=CELL:+'+intl(D.phone):'', D.email?'EMAIL:'+D.email:'', D.website?'URL:'+D.website:'','END:VCARD'].filter(Boolean).join('\n');
   addBtn('💾 Save contact', URL.createObjectURL(new Blob([vcf],{type:'text/vcard'})), {dl:D.name.replace(/\s+/g,'-')+'.vcf'});
 }
 
 function buildRoom(){
-  const st=load('room',{light:false,pc:false});
+  const st=load('room',{light:false});
   const paint=()=>{
     glow.style.opacity = st.light ? 1 : 0;
-    setHead({ico:'🏠',nm:'Room Control',tt:'Demo mode · no real devices yet',
-      og:'💡 Light: '+(st.light?'ON':'OFF'),lc:'💻 PC: '+(st.pc?'AWAKE':'SLEEPING'),tg:'Hover a button and hold, or pinch to press.'});
-    L.textContent='💡 Light '+(st.light?'ON':'OFF'); P.textContent='💻 PC '+(st.pc?'AWAKE':'SLEEP');
+    setHead({ico:'🏠',nm:'Room Control',tt:'Live · drives your laptop',
+      og:'💡 Light: '+(st.light?'ON':'OFF'),lc:'',tg:'Hold a button for a moment, or pinch to press.'});
+    L.textContent='💡 Light '+(st.light?'ON':'OFF');
   };
-  const set=(l,p)=>{ if(l!==st.light) hook(l?'light_on':'light_off'); if(p!==st.pc) hook(p?'pc_wake':'pc_sleep');
-    st.light=l; st.pc=p; save('room',st); paint(); };
-  const L=addBtn('',()=>set(!st.light,st.pc)), P=addBtn('',()=>set(st.light,!st.pc));
-  addBtn('☀️ All on',()=>set(true,true)); addBtn('🌙 All off',()=>set(false,false));
+  const set=on=>{ st.light=on; save('room',st); paint(); send({t:'light',on}); };
+  const L=addBtn('',()=>set(!st.light));
+  addBtn('☀️ All on',()=>set(true));
+  addBtn('🌙 All off',()=>set(false));
+  addBtn('⚡ Flash laptop',()=>send({t:'flash'}));
   paint();
 }
 
@@ -149,32 +168,47 @@ const PARTS={
 };
 const STEPS=['Fill the water tank','Grind and load the portafilter','Tamp and lock it in','Press brew (about 25-30 s)','Steam the milk, then enjoy ☕'];
 function buildCoffee(){
-  setHead({ico:'☕',nm:'Coffee Machine',tt:'Interactive parts guide',og:'',lc:'',tg:'Hover a button and hold, or pinch to learn about that part.'});
+  setHead({ico:'☕',nm:'Coffee Machine',tt:'Interactive parts guide',og:'',lc:'',tg:'Hold a button for a moment, or pinch to learn about that part.'});
   for(const k in PARTS) addBtn(k,()=>{ $('lc').textContent=k; $('tg').textContent=PARTS[k]; });
   let i=0; addBtn('▶ Brew steps',()=>{ $('lc').textContent='Brew guide '+(i+1)+'/'+STEPS.length; $('tg').textContent=STEPS[i]; i=(i+1)%STEPS.length; });
 }
 
-// ---------- QR tracking (targets T, smoothed state S) ----------
+// ---------- QR tracking ----------
 const T={x:0,y:0,size:100,ang:0}, S={x:0,y:0,size:100,ang:0,init:false};
-let lastSeen=0, sc=1, ox=0, oy=0, VW=1, VH=1;
+let lastSeen=0, sc=1, ox=0, oy=0, VW=1, VH=1, scanning=false;
 const map=(x,y)=>({x:x*sc+ox, y:y*sc+oy});
 
-function scanQR(vw,vh){
-  const cw=Math.min(640,vw), ch=Math.round(vh*cw/vw), r=vw/cw;
-  c.width=cw; c.height=ch; ctx.drawImage(v,0,0,cw,ch);
-  const q=jsQR(ctx.getImageData(0,0,cw,ch).data,cw,ch,{inversionAttempts:'dontInvert'});
-  if(!q) return;
+// Returns {data, pts} with pts in video-pixel coordinates.
+async function scanOnce(){
+  if(scanning) return; scanning=true;
+  try{
+    let hit=null;
+    if(BD){
+      const res=await BD.detect(v);
+      if(res.length) hit={data:res[0].rawValue, pts:res[0].cornerPoints.map(p=>({x:p.x,y:p.y}))};
+    }else{
+      const cw=Math.min(640,VW), ch=Math.round(VH*cw/VW), r=VW/cw;
+      c.width=cw; c.height=ch; ctx.drawImage(v,0,0,cw,ch);
+      const q=jsQR(ctx.getImageData(0,0,cw,ch).data,cw,ch,{inversionAttempts:'dontInvert'});
+      if(q){ const L=q.location;
+        hit={data:q.data, pts:[L.topLeftCorner,L.topRightCorner,L.bottomRightCorner,L.bottomLeftCorner].map(k=>({x:k.x*r,y:k.y*r}))}; }
+    }
+    if(hit) onQR(hit);
+  }catch(e){}
+  finally{ scanning=false; }
+}
+function onQR({data,pts}){
   lastSeen=performance.now();
-  if(q.data!==lastPayload){ lastPayload=q.data; build(q.data); S.init=false; }
-  const L=q.location, p=[L.topLeftCorner,L.topRightCorner,L.bottomRightCorner,L.bottomLeftCorner].map(k=>map(k.x*r,k.y*r));
+  if(data!==lastPayload){ lastPayload=data; build(data); S.init=false; }
+  const p=pts.map(k=>map(k.x,k.y));
   T.x=(p[0].x+p[1].x+p[2].x+p[3].x)/4; T.y=(p[0].y+p[1].y+p[2].y+p[3].y)/4;
   T.size=Math.hypot(p[1].x-p[0].x,p[1].y-p[0].y);
   T.ang=Math.atan2(p[1].y-p[0].y,p[1].x-p[0].x);
   if(!S.init) Object.assign(S,T,{init:true});
 }
 
-// ---------- Hand tracking ----------
-let hl=null, lastT=-1, hov=null, hovStart=0, cool=0, C={x:0,y:0,on:false}, tm;
+// ---------- Hand tracking (optional) ----------
+let hl=null, lastT=-1, hov=null, hovStart=0, cool=0, C={x:0,y:0,on:false}, tm, fr=0;
 async function initHands(){
   try{
     const base='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
@@ -184,9 +218,9 @@ async function initHands(){
       'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:'GPU'},
       runningMode:'VIDEO',numHands:1});
     flash('✋ Hover a button and hold, or pinch to press');
-  }catch(e){ console.warn(e); flash('Hand tracking unavailable. You can still tap buttons.'); }
+  }catch(e){ console.warn(e); flash('Hand tracking unavailable. Tap the buttons instead.'); }
 }
-function flash(t){ hint.textContent=t; hint.style.display='block'; clearTimeout(tm); tm=setTimeout(()=>hint.style.display='none',4500); }
+function flash(t){ hint.textContent=t; hint.style.display='block'; clearTimeout(tm); tm=setTimeout(()=>hint.style.display='none',4000); }
 
 function activate(b){
   if(b._fn){ b._fn(); return; }
@@ -218,35 +252,34 @@ function handStep(){
 function resetHover(){ btns.forEach(b=>{b.classList.remove('hot');b.style.setProperty('--p',0)}); hov=null; }
 
 // ---------- Main loop ----------
-let fr=0;
 function tick(){
   requestAnimationFrame(tick);
   if(v.readyState<2) return;
   VW=v.videoWidth; VH=v.videoHeight;
   sc=Math.max(innerWidth/VW,innerHeight/VH); ox=(innerWidth-VW*sc)/2; oy=(innerHeight-VH*sc)/2;
-  if(fr++%2===0) scanQR(VW,VH);
-  const vis=S.init && performance.now()-lastSeen<450;
-  if(vis){
+  if(fr++%2===0) scanOnce();
+  if(S.init && performance.now()-lastSeen<450){
+    // Smooth toward the latest detection: fast when far, settles when close.
     const k=Math.min(.9,.15+Math.hypot(T.x-S.x,T.y-S.y)/80), j=.18;
     S.x+=(T.x-S.x)*k; S.y+=(T.y-S.y)*k; S.size+=(T.size-S.size)*j;
     let da=T.ang-S.ang; da=Math.atan2(Math.sin(da),Math.cos(da)); S.ang+=da*j;
     const s=Math.max(.75,Math.min(1.4,S.size/200));
     rig.style.setProperty('--h',(S.size/2/s)+'px');
     rig.style.transform=`translate(${S.x}px,${S.y}px) rotate(${S.ang}rad) scale(${s})`;
-    rig.style.display='block'; if(hint.dataset.qr!=='1') hint.style.display='none';
-  } else { rig.style.display='none'; if(!hl||!C.on) hint.style.display=hint.textContent?'block':'none'; }
+    rig.style.display='block';
+  } else { rig.style.display='none'; }
   if(hl && v.currentTime!==lastT){ lastT=v.currentTime; handStep(); }
 }
 
 $('go').onclick=async()=>{
-  if(typeof jsQR==='undefined'){ alert('QR library failed to load. Reload the page.'); return; }
+  if(typeof jsQR==='undefined' && !BD){ alert('QR library failed to load. Reload the page.'); return; }
   if($('go').disabled) return; $('go').disabled=true; $('go').textContent='Starting…';
   try{
     const warn=setTimeout(()=>{ $('go').textContent='Waiting for camera… close other tabs using it'; },6000);
     v.srcObject=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
     clearTimeout(warn);
     v.play().catch(()=>{});
-    $('start').remove(); initHands(); tick();
+    $('start').remove(); initHands(); flash('Point the camera at a QR code'); tick();
   }catch(e){ $('go').disabled=false; $('go').textContent='Start camera'; alert('Camera error: '+e.message); }
 };
 </script>
