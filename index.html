@@ -17,6 +17,8 @@ video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
 .row{display:flex;gap:12px;align-items:center}
 #face{width:70px;height:70px;border-radius:50%;object-fit:cover;border:3px solid transparent;
   background:linear-gradient(#111,#111) padding-box,linear-gradient(135deg,#7c5cff,#00d4ff) border-box;flex:none}
+#ico{width:70px;height:70px;border-radius:50%;display:none;align-items:center;justify-content:center;font-size:34px;flex:none;background:linear-gradient(135deg,#7c5cff55,#00d4ff55);border:3px solid #ffffff44}
+#glow{position:absolute;left:calc(var(--h)*-1.7);top:calc(var(--h)*-1.7);width:calc(var(--h)*3.4);height:calc(var(--h)*3.4);border-radius:50%;background:radial-gradient(circle,rgba(255,200,90,.6),rgba(255,170,60,0) 68%);mix-blend-mode:screen;opacity:0;transition:opacity .6s;pointer-events:none}
 #nm{font-size:18px;font-weight:700;line-height:1.15}
 #tt{font-size:12px;color:#8fe3ff;margin-top:3px}
 #og,#lc{font-size:11px;opacity:.75;margin-top:2px}
@@ -45,8 +47,9 @@ video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
 <video id="v" playsinline muted></video>
 <div id="stage">
   <div id="rig">
+    <div id="glow"></div>
     <div id="card"><div class="float in">
-      <div class="row"><img id="face" src="face.jpg" alt="">
+      <div class="row"><img id="face" src="face.jpg" alt=""><div id="ico"></div>
         <div><div id="nm"></div><div id="tt"></div><div id="og"></div><div id="lc"></div></div></div>
       <div id="tg"></div>
     </div></div>
@@ -85,21 +88,70 @@ const LINKS = {
   website:   d => ['🌐 Website',     d.startsWith('http') ? d : 'https://' + d],
 };
 
+// Paste real webhook URLs here later (e.g. Home Assistant). Empty = demo mode only.
+const HOOKS = { light_on:'', light_off:'', pc_wake:'', pc_sleep:'' };
+const hook = k => { if(HOOKS[k]) { try{ fetch(HOOKS[k],{method:'POST',mode:'no-cors'}); }catch(e){} } };
+const load = (k,d) => { try{ return JSON.parse(localStorage.getItem('ar_'+k)) ?? d; }catch{ return d; } };
+const save = (k,v) => { try{ localStorage.setItem('ar_'+k, JSON.stringify(v)); }catch{} };
+const glow = $('glow');
 let btns = [], lastPayload = null;
+
+function setHead(h){
+  $('face').style.display = h.ico ? 'none' : 'block';
+  $('ico').style.display = h.ico ? 'flex' : 'none'; $('ico').textContent = h.ico || '';
+  $('nm').textContent=h.nm; $('tt').textContent=h.tt||''; $('og').textContent=h.og||'';
+  $('lc').textContent=h.lc||''; $('tg').textContent=h.tg||'';
+}
+function addBtn(label, target, extra={}){
+  const a=document.createElement('a'); a.className='btn'; a.textContent=label; a.dataset.name=label; Object.assign(a.dataset,extra);
+  if(typeof target==='function'){ a._fn=()=>target(a); a.href='#'; a.onclick=e=>{ e.preventDefault(); a._fn(); }; }
+  else { a.href=target; a.target='_blank'; a.rel='noopener'; }
+  grid.appendChild(a); btns.push(a); return a;
+}
+
 function build(raw){
-  let q; try { q = JSON.parse(raw); } catch { q = /^https?:|\./.test(raw) ? {website:raw} : {}; }
-  const D = {...PROFILE, ...q};
-  $('nm').textContent=D.name; $('tt').textContent=D.title; $('og').textContent=D.org;
-  $('lc').textContent=D.loc ? '📍 ' + D.loc : ''; $('tg').textContent=D.tagline||'';
-  grid.innerHTML=''; btns=[];
-  const add = (label, href, extra={}) => {
-    const a=document.createElement('a'); a.className='btn'; a.textContent=label; a.href=href; a.target='_blank'; a.rel='noopener';
-    a.dataset.name=label; Object.assign(a.dataset, extra); grid.appendChild(a); btns.push(a);
-  };
-  for (const k in LINKS) if (D[k]) add(...LINKS[k](String(D[k])));
+  grid.innerHTML=''; btns=[]; glow.style.opacity=0;
+  const t = raw.startsWith('ar:') ? raw.slice(3) : 'card';
+  if(t==='lights') buildRoom(); else if(t==='coffee') buildCoffee(); else buildCard(raw);
+}
+
+function buildCard(raw){
+  let q={}; if(raw!=='ar:card'){ try{ q=JSON.parse(raw); }catch{ q=/^https?:|\./.test(raw)?{website:raw}:{}; } }
+  const D={...PROFILE,...q};
+  setHead({nm:D.name,tt:D.title,og:D.org,lc:D.loc?'📍 '+D.loc:'',tg:D.tagline});
+  for(const k in LINKS) if(D[k]) addBtn(...LINKS[k](String(D[k])));
   const vcf=['BEGIN:VCARD','VERSION:3.0','FN:'+D.name,'ORG:'+(D.org||''),'TITLE:'+(D.title||''),
     D.phone?'TEL;TYPE=CELL:+'+intl(D.phone):'', D.email?'EMAIL:'+D.email:'', D.website?'URL:'+D.website:'','END:VCARD'].filter(Boolean).join('\n');
-  add('💾 Save contact', URL.createObjectURL(new Blob([vcf],{type:'text/vcard'})), {dl:D.name.replace(/\s+/g,'-')+'.vcf'});
+  addBtn('💾 Save contact', URL.createObjectURL(new Blob([vcf],{type:'text/vcard'})), {dl:D.name.replace(/\s+/g,'-')+'.vcf'});
+}
+
+function buildRoom(){
+  const st=load('room',{light:false,pc:false});
+  const paint=()=>{
+    glow.style.opacity = st.light ? 1 : 0;
+    setHead({ico:'🏠',nm:'Room Control',tt:'Demo mode · no real devices yet',
+      og:'💡 Light: '+(st.light?'ON':'OFF'),lc:'💻 PC: '+(st.pc?'AWAKE':'SLEEPING'),tg:'Hover a button and hold, or pinch to press.'});
+    L.textContent='💡 Light '+(st.light?'ON':'OFF'); P.textContent='💻 PC '+(st.pc?'AWAKE':'SLEEP');
+  };
+  const set=(l,p)=>{ if(l!==st.light) hook(l?'light_on':'light_off'); if(p!==st.pc) hook(p?'pc_wake':'pc_sleep');
+    st.light=l; st.pc=p; save('room',st); paint(); };
+  const L=addBtn('',()=>set(!st.light,st.pc)), P=addBtn('',()=>set(st.light,!st.pc));
+  addBtn('☀️ All on',()=>set(true,true)); addBtn('🌙 All off',()=>set(false,false));
+  paint();
+}
+
+const PARTS={
+  '💧 Water tank':'Fill with fresh cold water up to the MAX line. Refill daily and rinse weekly.',
+  '🔩 Portafilter':'Holds the ground coffee. Level the grounds, tamp evenly, then lock it into the group head.',
+  '💨 Steam wand':'Heats and froths milk. Purge it before use and wipe it right after.',
+  '🫖 Drip tray':'Catches spills and drips. Empty it daily so it never overflows.',
+  '🌱 Bean hopper':'Holds whole beans for the grinder. Only fill what you will use this week.'
+};
+const STEPS=['Fill the water tank','Grind and load the portafilter','Tamp and lock it in','Press brew (about 25-30 s)','Steam the milk, then enjoy ☕'];
+function buildCoffee(){
+  setHead({ico:'☕',nm:'Coffee Machine',tt:'Interactive parts guide',og:'',lc:'',tg:'Hover a button and hold, or pinch to learn about that part.'});
+  for(const k in PARTS) addBtn(k,()=>{ $('lc').textContent=k; $('tg').textContent=PARTS[k]; });
+  let i=0; addBtn('▶ Brew steps',()=>{ $('lc').textContent='Brew guide '+(i+1)+'/'+STEPS.length; $('tg').textContent=STEPS[i]; i=(i+1)%STEPS.length; });
 }
 
 // ---------- QR tracking (targets T, smoothed state S) ----------
@@ -137,6 +189,7 @@ async function initHands(){
 function flash(t){ hint.textContent=t; hint.style.display='block'; clearTimeout(tm); tm=setTimeout(()=>hint.style.display='none',4500); }
 
 function activate(b){
+  if(b._fn){ b._fn(); return; }
   const h=b.getAttribute('href');
   if(/^(tel:|mailto:)/.test(h)){ location.href=h; return; }
   sl.href=h; sl.textContent='Open ' + b.dataset.name + ' ↗';
@@ -160,7 +213,7 @@ function handStep(){
   if(on!==hov){ resetHover(); hov=on; hovStart=now; if(on) on.classList.add('hot'); }
   if(!on) return;
   const p=Math.min(1,(now-hovStart)/DWELL); on.style.setProperty('--p',p);
-  if((p>=1||pinch)&&now>cool){ cool=now+1800; activate(on); resetHover(); }
+  if((p>=1||pinch)&&now>cool){ cool=now+(on._fn?900:1800); activate(on); resetHover(); }
 }
 function resetHover(){ btns.forEach(b=>{b.classList.remove('hot');b.style.setProperty('--p',0)}); hov=null; }
 
@@ -189,9 +242,10 @@ $('go').onclick=async()=>{
   if(typeof jsQR==='undefined'){ alert('QR library failed to load. Reload the page.'); return; }
   if($('go').disabled) return; $('go').disabled=true; $('go').textContent='Starting…';
   try{
+    const warn=setTimeout(()=>{ $('go').textContent='Waiting for camera… close other tabs using it'; },6000);
     v.srcObject=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
+    clearTimeout(warn);
     v.play().catch(()=>{});
-    await new Promise(res=>{ if(v.readyState>=2) res(); else v.onloadeddata=res; });
     $('start').remove(); initHands(); tick();
   }catch(e){ $('go').disabled=false; $('go').textContent='Start camera'; alert('Camera error: '+e.message); }
 };
