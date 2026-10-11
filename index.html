@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AR Business Card</title>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,-apple-system,sans-serif;color:#fff}
+video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
+#stage{position:fixed;inset:0;pointer-events:none;overflow:hidden}
+#rig{position:absolute;left:0;top:0;width:0;height:0;display:none;will-change:transform}
+.float{animation:bob 2.4s ease-in-out infinite}
+@keyframes bob{50%{transform:translateY(-6px)}}
+#card{position:absolute;width:270px;left:-135px;top:calc(var(--h)*-1 - 14px);transform:translateY(-100%)}
+#card .in{background:linear-gradient(135deg,rgba(30,27,60,.92),rgba(12,18,40,.92));border:1px solid rgba(255,255,255,.28);
+  border-radius:18px;padding:14px;box-shadow:0 12px 30px #000a;backdrop-filter:blur(8px)}
+.row{display:flex;gap:12px;align-items:center}
+#face{width:70px;height:70px;border-radius:50%;object-fit:cover;border:3px solid transparent;
+  background:linear-gradient(#111,#111) padding-box,linear-gradient(135deg,#7c5cff,#00d4ff) border-box;flex:none}
+#nm{font-size:18px;font-weight:700;line-height:1.15}
+#tt{font-size:12px;color:#8fe3ff;margin-top:3px}
+#og,#lc{font-size:11px;opacity:.75;margin-top:2px}
+#tg{font-size:12px;opacity:.9;margin-top:10px;padding-top:9px;border-top:1px solid #fff3}
+#grid{position:absolute;width:270px;left:-135px;top:calc(var(--h) + 14px);display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn{position:relative;overflow:hidden;pointer-events:auto;text-decoration:none;color:#fff;font-size:13px;text-align:center;
+  padding:11px 6px;border-radius:14px;background:rgba(20,22,40,.88);border:1px solid rgba(255,255,255,.3);
+  box-shadow:0 6px 16px #0008;transition:transform .12s,border-color .12s;white-space:nowrap;text-overflow:ellipsis}
+.btn::after{content:"";position:absolute;left:0;bottom:0;height:4px;width:calc(var(--p,0)*100%);background:linear-gradient(90deg,#7c5cff,#00d4ff)}
+.btn.hot{transform:scale(1.08);border-color:#00d4ff}
+#cur{position:fixed;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;border:3px solid #00d4ff;
+  background:rgba(0,212,255,.25);display:none;pointer-events:none;z-index:6}
+#cur.pin{background:#00d4ff}
+#hint{position:fixed;top:env(safe-area-inset-top,0);left:0;right:0;text-align:center;padding:14px;font-size:15px;
+  background:linear-gradient(#000a,#0000);pointer-events:none}
+#sheet{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0));transform:translateX(-50%);display:none;
+  gap:10px;align-items:center;background:#111e;border:1px solid #fff5;border-radius:999px;padding:8px 10px 8px 18px;z-index:8}
+#sheet a{color:#00d4ff;font-weight:600;text-decoration:none}
+#sheet button{border:0;background:#fff2;color:#fff;border-radius:50%;width:30px;height:30px}
+#start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0b0b14;z-index:9}
+#start button{font-size:18px;padding:14px 30px;border:0;border-radius:30px;color:#fff;background:linear-gradient(135deg,#7c5cff,#00d4ff)}
+</style>
+</head>
+<body>
+<div id="start"><button id="go">Start camera</button></div>
+<video id="v" playsinline muted></video>
+<div id="stage">
+  <div id="rig">
+    <div id="card"><div class="float in">
+      <div class="row"><img id="face" src="face.jpg" alt="">
+        <div><div id="nm"></div><div id="tt"></div><div id="og"></div><div id="lc"></div></div></div>
+      <div id="tg"></div>
+    </div></div>
+    <div id="grid" class="float"></div>
+  </div>
+</div>
+<div id="cur"></div>
+<div id="hint">Point the camera at the QR code</div>
+<div id="sheet"><a id="sl" target="_blank" rel="noopener"></a><button id="sx">✕</button></div>
+<canvas id="c" style="display:none"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script>
+// ===== EDIT YOUR DETAILS HERE (empty fields are skipped) =====
+const PROFILE = {
+  name:'Lameck Mose', title:'Freelance Web Developer & Designer',
+  org:'BSc Software Development · KCA University', loc:'Kenya',
+  tagline:'I build clean, fast websites and apps.',
+  phone:'0703382780', whatsapp:'254703382780', instagram:'lamecky2.0',
+  email:'', github:'', linkedin:'', x:'', website:''
+};
+const DWELL = 900;   // ms to hold a finger over a button
+const $ = id => document.getElementById(id);
+const v=$('v'), c=$('c'), ctx=c.getContext('2d',{willReadFrequently:true}),
+      rig=$('rig'), grid=$('grid'), cur=$('cur'), hint=$('hint'), sheet=$('sheet'), sl=$('sl');
+const intl = n => { n=String(n).replace(/\D/g,''); return n.startsWith('0') ? '254'+n.slice(1) : n; };
+
+const LINKS = {
+  phone:     d => ['📞 Call',        'tel:+' + intl(d)],
+  whatsapp:  d => ['💬 WhatsApp',    'https://wa.me/' + intl(d)],
+  instagram: d => ['📸 @' + d,       'https://instagram.com/' + d],
+  email:     d => ['✉️ Email',       'mailto:' + d],
+  github:    d => ['💻 GitHub',      'https://github.com/' + d],
+  linkedin:  d => ['🔗 LinkedIn',    'https://linkedin.com/in/' + d],
+  x:         d => ['𝕏 @' + d,        'https://x.com/' + d],
+  website:   d => ['🌐 Website',     d.startsWith('http') ? d : 'https://' + d],
+};
+
+let btns = [], lastPayload = null;
+function build(raw){
+  let q; try { q = JSON.parse(raw); } catch { q = /^https?:|\./.test(raw) ? {website:raw} : {}; }
+  const D = {...PROFILE, ...q};
+  $('nm').textContent=D.name; $('tt').textContent=D.title; $('og').textContent=D.org;
+  $('lc').textContent=D.loc ? '📍 ' + D.loc : ''; $('tg').textContent=D.tagline||'';
+  grid.innerHTML=''; btns=[];
+  const add = (label, href, extra={}) => {
+    const a=document.createElement('a'); a.className='btn'; a.textContent=label; a.href=href; a.target='_blank'; a.rel='noopener';
+    a.dataset.name=label; Object.assign(a.dataset, extra); grid.appendChild(a); btns.push(a);
+  };
+  for (const k in LINKS) if (D[k]) add(...LINKS[k](String(D[k])));
+  const vcf=['BEGIN:VCARD','VERSION:3.0','FN:'+D.name,'ORG:'+(D.org||''),'TITLE:'+(D.title||''),
+    D.phone?'TEL;TYPE=CELL:+'+intl(D.phone):'', D.email?'EMAIL:'+D.email:'', D.website?'URL:'+D.website:'','END:VCARD'].filter(Boolean).join('\n');
+  add('💾 Save contact', URL.createObjectURL(new Blob([vcf],{type:'text/vcard'})), {dl:D.name.replace(/\s+/g,'-')+'.vcf'});
+}
+
+// ---------- QR tracking (targets T, smoothed state S) ----------
+const T={x:0,y:0,size:100,ang:0}, S={x:0,y:0,size:100,ang:0,init:false};
+let lastSeen=0, sc=1, ox=0, oy=0, VW=1, VH=1;
+const map=(x,y)=>({x:x*sc+ox, y:y*sc+oy});
+
+function scanQR(vw,vh){
+  const cw=Math.min(640,vw), ch=Math.round(vh*cw/vw), r=vw/cw;
+  c.width=cw; c.height=ch; ctx.drawImage(v,0,0,cw,ch);
+  const q=jsQR(ctx.getImageData(0,0,cw,ch).data,cw,ch,{inversionAttempts:'dontInvert'});
+  if(!q) return;
+  lastSeen=performance.now();
+  if(q.data!==lastPayload){ lastPayload=q.data; build(q.data); S.init=false; }
+  const L=q.location, p=[L.topLeftCorner,L.topRightCorner,L.bottomRightCorner,L.bottomLeftCorner].map(k=>map(k.x*r,k.y*r));
+  T.x=(p[0].x+p[1].x+p[2].x+p[3].x)/4; T.y=(p[0].y+p[1].y+p[2].y+p[3].y)/4;
+  T.size=Math.hypot(p[1].x-p[0].x,p[1].y-p[0].y);
+  T.ang=Math.atan2(p[1].y-p[0].y,p[1].x-p[0].x);
+  if(!S.init) Object.assign(S,T,{init:true});
+}
+
+// ---------- Hand tracking ----------
+let hl=null, lastT=-1, hov=null, hovStart=0, cool=0, C={x:0,y:0,on:false}, tm;
+async function initHands(){
+  try{
+    const base='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+    const m=await import(base+'/vision_bundle.mjs');
+    const fs=await m.FilesetResolver.forVisionTasks(base+'/wasm');
+    hl=await m.HandLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:
+      'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:'GPU'},
+      runningMode:'VIDEO',numHands:1});
+    flash('✋ Hover a button and hold, or pinch to press');
+  }catch(e){ console.warn(e); flash('Hand tracking unavailable. You can still tap buttons.'); }
+}
+function flash(t){ hint.textContent=t; hint.style.display='block'; clearTimeout(tm); tm=setTimeout(()=>hint.style.display='none',4500); }
+
+function activate(b){
+  const h=b.getAttribute('href');
+  if(/^(tel:|mailto:)/.test(h)){ location.href=h; return; }
+  sl.href=h; sl.textContent='Open ' + b.dataset.name + ' ↗';
+  b.dataset.dl ? sl.setAttribute('download',b.dataset.dl) : sl.removeAttribute('download');
+  sheet.style.display='flex'; clearTimeout(activate.t); activate.t=setTimeout(()=>sheet.style.display='none',7000);
+}
+$('sx').onclick=()=>sheet.style.display='none';
+
+function handStep(){
+  const r=hl.detectForVideo(v,performance.now());
+  if(!r.landmarks.length){ C.on=false; cur.style.display='none'; resetHover(); return; }
+  const lm=r.landmarks[0], tip=map(lm[8].x*VW,lm[8].y*VH);
+  const d=(a,b)=>Math.hypot((a.x-b.x)*VW,(a.y-b.y)*VH);
+  const pinch=d(lm[4],lm[8])/d(lm[0],lm[9])<0.32;
+  if(!C.on) Object.assign(C,tip,{on:true}); else { C.x+=(tip.x-C.x)*.55; C.y+=(tip.y-C.y)*.55; }
+  cur.style.display='block'; cur.style.left=C.x+'px'; cur.style.top=C.y+'px'; cur.classList.toggle('pin',pinch);
+  if(rig.style.display!=='block'){ resetHover(); return; }
+  const now=performance.now(); let on=null;
+  for(const b of btns){ const k=b.getBoundingClientRect();
+    if(C.x>k.left-10&&C.x<k.right+10&&C.y>k.top-10&&C.y<k.bottom+10){ on=b; break; } }
+  if(on!==hov){ resetHover(); hov=on; hovStart=now; if(on) on.classList.add('hot'); }
+  if(!on) return;
+  const p=Math.min(1,(now-hovStart)/DWELL); on.style.setProperty('--p',p);
+  if((p>=1||pinch)&&now>cool){ cool=now+1800; activate(on); resetHover(); }
+}
+function resetHover(){ btns.forEach(b=>{b.classList.remove('hot');b.style.setProperty('--p',0)}); hov=null; }
+
+// ---------- Main loop ----------
+let fr=0;
+function tick(){
+  requestAnimationFrame(tick);
+  if(v.readyState<2) return;
+  VW=v.videoWidth; VH=v.videoHeight;
+  sc=Math.max(innerWidth/VW,innerHeight/VH); ox=(innerWidth-VW*sc)/2; oy=(innerHeight-VH*sc)/2;
+  if(fr++%2===0) scanQR(VW,VH);
+  const vis=S.init && performance.now()-lastSeen<450;
+  if(vis){
+    const k=Math.min(.9,.15+Math.hypot(T.x-S.x,T.y-S.y)/80), j=.18;
+    S.x+=(T.x-S.x)*k; S.y+=(T.y-S.y)*k; S.size+=(T.size-S.size)*j;
+    let da=T.ang-S.ang; da=Math.atan2(Math.sin(da),Math.cos(da)); S.ang+=da*j;
+    const s=Math.max(.75,Math.min(1.4,S.size/200));
+    rig.style.setProperty('--h',(S.size/2/s)+'px');
+    rig.style.transform=`translate(${S.x}px,${S.y}px) rotate(${S.ang}rad) scale(${s})`;
+    rig.style.display='block'; if(hint.dataset.qr!=='1') hint.style.display='none';
+  } else { rig.style.display='none'; if(!hl||!C.on) hint.style.display=hint.textContent?'block':'none'; }
+  if(hl && v.currentTime!==lastT){ lastT=v.currentTime; handStep(); }
+}
+
+$('go').onclick=async()=>{
+  if(typeof jsQR==='undefined'){ alert('QR library failed to load. Reload the page.'); return; }
+  if($('go').disabled) return; $('go').disabled=true; $('go').textContent='Starting…';
+  try{
+    v.srcObject=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
+    v.play().catch(()=>{});
+    await new Promise(res=>{ if(v.readyState>=2) res(); else v.onloadeddata=res; });
+    $('start').remove(); initHands(); tick();
+  }catch(e){ $('go').disabled=false; $('go').textContent='Start camera'; alert('Camera error: '+e.message); }
+};
+</script>
+</body>
+</html>
